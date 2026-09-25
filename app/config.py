@@ -9,7 +9,6 @@ load_dotenv(BASE_DIR / ".env")
 with open(BASE_DIR / "config.yaml", "r", encoding="utf-8") as f:
     CONFIG = yaml.safe_load(f)
 
-WEBSITES = CONFIG.get("websites", [])
 KEYWORDS = CONFIG.get("keywords", [])
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -23,3 +22,9 @@ DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 # the channel should only carry actual articles at that point, not operational chatter.
 RUN_SUMMARY_ENABLED = os.environ.get("RUN_SUMMARY_ENABLED", "false").strip().lower() == "true"
 RUN_LOG_PATH = BASE_DIR / "data" / "run.log"
+
+# Dev/monitoring-stage only: appends a note to each posted message explaining
+# why/how it was found (which method, and the source domain or keyword).
+# Set to false in .env before wider rollout - the channel should carry clean
+# article links at that point, not diagnostic notes.
+POST_REASON_ENABLED = os.environ.get("POST_REASON_ENABLED", "false").strip().lower() == "true"

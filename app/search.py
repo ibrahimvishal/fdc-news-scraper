@@ -2,47 +2,20 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus
 import json
 import re
-import time
 import feedparser
-import requests
+
+from .http import request_with_retry, USER_AGENT
 
 # hl=en only - no gl/ceid country-edition lock, so results aren't implicitly
 # scoped to one country's press.
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q={query}&hl=en"
 BATCH_EXECUTE_URL = "https://news.google.com/_/DotsSplashUi/data/batchexecute"
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
 
 # How far back to accept articles. Filtering is done client-side on each
 # entry's published date because Google News RSS's "after:"/"before:"/"when:"
 # query operators silently return zero results for these queries — they are
 # not a reliable way to scope by date.
 LOOKBACK_DAYS = 2
-
-MAX_RETRIES = 3
-RETRY_BACKOFF_SECONDS = 2
-REQUEST_TIMEOUT = 15
-
-def _request_with_retry(method: str, url: str, **kwargs):
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            response = requests.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
-            response.raise_for_status()
-            return response
-        except requests.RequestException as exc:
-            if attempt == MAX_RETRIES:
-                print(f"Request failed after {MAX_RETRIES} attempts: {url} ({exc})")
-                return None
-            time.sleep(RETRY_BACKOFF_SECONDS * attempt)
-    return None
-
-def build_query(keyword: str, domain: str | None) -> str:
-    query = f'"{keyword}"'
-    if domain:
-        query = f'site:{domain} {query}'
-    return query
 
 def is_recent(entry) -> bool:
     published = getattr(entry, "published_parsed", None)
@@ -52,10 +25,14 @@ def is_recent(entry) -> bool:
     cutoff = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
     return published_at >= cutoff
 
-def search(keyword: str, domain: str | None) -> list[str]:
-    query = build_query(keyword, domain)
+def search(keyword: str) -> list[str]:
+    """General Google News search for a keyword - no site restriction. This is
+    the catch-all for coverage outside the sites in tags.yaml/search.yaml
+    (see app/tags.py), which is now the primary discovery method for the
+    known Maldivian outlets."""
+    query = f'"{keyword}"'
     url = GOOGLE_NEWS_RSS.format(query=quote_plus(query))
-    response = _request_with_retry("GET", url, headers={"User-Agent": USER_AGENT})
+    response = request_with_retry("GET", url, headers={"User-Agent": USER_AGENT})
     if response is None:
         return []
 
@@ -71,23 +48,10 @@ def search(keyword: str, domain: str | None) -> list[str]:
 
     return list(dict.fromkeys(urls))
 
-def search_all(websites: list[str], keywords: list[str]) -> list[str]:
+def search_all(keywords: list[str]) -> list[str]:
     urls = []
-
-    # One request per site per keyword. A combined "(site:a OR site:b OR ...)
-    # keyword" query was tried and found to break Google's AND logic between
-    # the site clause and the keyword - it returned ~100 generic recent
-    # articles per site regardless of keyword relevance, instead of the
-    # handful of genuinely on-topic ones. Do not reintroduce that
-    # optimization without re-verifying against live results first.
-    for domain in websites:
-        for keyword in keywords:
-            urls.extend(search(keyword, domain))
-
-    # General search, no site restriction.
     for keyword in keywords:
-        urls.extend(search(keyword, None))
-
+        urls.extend(search(keyword))
     return list(dict.fromkeys(urls))
 
 def resolve_real_url(google_url: str) -> str:
@@ -101,7 +65,7 @@ def resolve_real_url(google_url: str) -> str:
     back to returning the original Google News link rather than dropping the
     article.
     """
-    page = _request_with_retry("GET", google_url, headers={"User-Agent": USER_AGENT})
+    page = request_with_retry("GET", google_url, headers={"User-Agent": USER_AGENT})
     if page is None:
         return google_url
 
@@ -121,7 +85,7 @@ def resolve_real_url(google_url: str) -> str:
     ])
     freq = json.dumps([[["Fbv4je", payload_inner, None, "generic"]]])
 
-    response = _request_with_retry(
+    response = request_with_retry(
         "POST", BATCH_EXECUTE_URL,
         headers={
             "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",

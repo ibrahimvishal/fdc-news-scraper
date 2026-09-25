@@ -1,26 +1,5 @@
-# News sources and keywords.
-# The same keywords are used for both:
-# 1) site-restricted searches against the website list
-# 2) general keyword searches
-
-websites:
-  - edition.mv
-  - mihaaru.com
-  - avas.mv
-  - sun.mv
-  - psmnews.mv
-  - raajje.mv
-  - dhauru.com
-  - www.oneonline.mv
-  - adhadhu.com
-  - cnm.mv
-  - thepress.mv
-  - maldivesindependent.com
-  - miadhu.mv
-  - www.sangu.tv # returns 0 results either way with/without www - may not be indexed by Google News, needs manual check
-  - vnews.mv
-  - atolltimes.mv
-  - corporatemaldives.com
+# Search keywords, used for the general (no site restriction) Google News search.
+# Site-specific discovery is configured separately in tags.yaml and search.yaml.
 
 keywords:
   - "fahi dhiriulhun corporation"
