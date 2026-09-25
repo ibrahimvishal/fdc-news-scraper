@@ -96,7 +96,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=vishal
+User=<deploy-user>
 WorkingDirectory=/opt/fdc-news-scraper
 ExecStart=/opt/fdc-news-scraper/.venv/bin/python /opt/fdc-news-scraper/run.py
 TimeoutStartSec=900

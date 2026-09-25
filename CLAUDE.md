@@ -95,12 +95,13 @@ python run.py
 
 ## Deployment
 
-Deployed at `/opt/fdc-news-scraper` on the Leaseweb VPS (`vishal@23.111.14.67`), alongside
-other unrelated services on that box (`agreements-sme`, `client-tracker`, `cms-tts` — do not
-touch those). Scheduled via a systemd oneshot service + timer (`fdc-news-scraper.service` /
-`fdc-news-scraper.timer`), not cron — see README's "Scheduling" section for the unit files and
-schedule. Git-deployed from this GitHub repo using a read-only deploy key
-(`~/.ssh/fdc_news_scraper_deploy` on the VPS); pull latest with:
+Deployed at `/opt/fdc-news-scraper` on a VPS, alongside other unrelated services on that box
+(`agreements-sme`, `client-tracker`, `cms-tts` — do not touch those). Connection details
+(host, user) aren't kept in this repo — ask the project owner. Scheduled via a systemd oneshot
+service + timer (`fdc-news-scraper.service` / `fdc-news-scraper.timer`), not cron — see
+README's "Scheduling" section for the unit files and schedule. Git-deployed from this GitHub
+repo using a read-only deploy key (`~/.ssh/fdc_news_scraper_deploy` on the VPS); pull latest
+with:
 
 ```bash
 cd /opt/fdc-news-scraper && git pull
