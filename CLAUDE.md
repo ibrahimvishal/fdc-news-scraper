@@ -81,6 +81,22 @@ cp .env.example .env            # fill in TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
 python run.py
 ```
 
+## Deployment
+
+Deployed at `/opt/fdc-news-scraper` on the Leaseweb VPS (`vishal@23.111.14.67`), alongside
+other unrelated services on that box (`agreements-sme`, `client-tracker`, `cms-tts` — do not
+touch those). Scheduled via a systemd oneshot service + timer (`fdc-news-scraper.service` /
+`fdc-news-scraper.timer`), not cron — see README's "Scheduling" section for the unit files and
+schedule. Git-deployed from this GitHub repo using a read-only deploy key
+(`~/.ssh/fdc_news_scraper_deploy` on the VPS); pull latest with:
+
+```bash
+cd /opt/fdc-news-scraper && git pull
+```
+
+`.venv/` and `.env` on the VPS are not in git and need to be recreated/updated manually if
+dependencies or credentials change (`.venv/bin/pip install -r requirements.txt`, edit `.env`).
+
 ## Known limitations / things to keep in mind when extending this
 
 - **Single search backend**: everything goes through Google News RSS (`feedparser`). It's free

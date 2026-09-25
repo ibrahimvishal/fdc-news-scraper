@@ -69,55 +69,68 @@ The SQLite database will be created at:
 data/articles.db
 ```
 
-## Cron
+## Scheduling (systemd timer)
 
-Runs twice a day: **11:00 AM** and **9:00 PM** Maldives time (MVT, UTC+5, no DST).
+Runs twice a day: **11:00 AM** and **9:00 PM** Maldives time (MVT, UTC+5, no DST). Deployed via
+a systemd oneshot service + timer rather than cron, so runs show up in `journalctl` alongside
+everything else on the host and survive a reboot (`Persistent=true` catches up a missed run).
 
-Find the virtualenv's Python path:
-
-```bash
-pwd
-```
-
-Check the VPS's configured timezone first:
+Check the VPS's configured timezone first — if it's not UTC, adjust `OnCalendar` accordingly
+(11:00 MVT = 06:00 UTC, 21:00 MVT = 16:00 UTC):
 
 ```bash
 timedatectl
 ```
 
-**If the VPS is set to `Asia/Male`**, use local times directly:
+`/etc/systemd/system/fdc-news-scraper.service`:
 
-```cron
-0 11 * * * /opt/news-scraper/.venv/bin/python /opt/news-scraper/run.py >> /opt/news-scraper/data/cron.log 2>&1
-0 21 * * * /opt/news-scraper/.venv/bin/python /opt/news-scraper/run.py >> /opt/news-scraper/data/cron.log 2>&1
+```ini
+[Unit]
+Description=FDC News Scraper (Telegram press monitor)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=vishal
+WorkingDirectory=/opt/fdc-news-scraper
+ExecStart=/opt/fdc-news-scraper/.venv/bin/python /opt/fdc-news-scraper/run.py
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal
 ```
 
-**If the VPS is set to UTC** (common default), convert: 11:00 MVT = 06:00 UTC, 21:00 MVT = 16:00 UTC:
+`/etc/systemd/system/fdc-news-scraper.timer`:
 
-```cron
-0 6 * * * /opt/news-scraper/.venv/bin/python /opt/news-scraper/run.py >> /opt/news-scraper/data/cron.log 2>&1
-0 16 * * * /opt/news-scraper/.venv/bin/python /opt/news-scraper/run.py >> /opt/news-scraper/data/cron.log 2>&1
+```ini
+[Unit]
+Description=Run FDC News Scraper twice daily (11:00 and 21:00 MVT / 06:00 and 16:00 UTC)
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+OnCalendar=*-*-* 16:00:00
+Persistent=true
+Unit=fdc-news-scraper.service
+
+[Install]
+WantedBy=timers.target
 ```
-
-Edit cron with:
 
 ```bash
-crontab -e
+sudo systemctl daemon-reload
+sudo systemctl enable --now fdc-news-scraper.timer
+
+# check schedule / status
+systemctl list-timers fdc-news-scraper.timer
+journalctl -u fdc-news-scraper.service -n 50 --no-pager
+
+# trigger a run manually, outside the schedule
+sudo systemctl start fdc-news-scraper.service
 ```
 
-Adjust `/opt/news-scraper` to the actual installation directory.
-
-Set up log rotation so `cron.log` doesn't grow unbounded, e.g. `/etc/logrotate.d/news-scraper`:
-
-```
-/opt/news-scraper/data/cron.log {
-    weekly
-    rotate 8
-    compress
-    missingok
-    notifempty
-}
-```
+`systemctl status` on a completed oneshot service reports exit code 3 ("inactive") even on
+success — check the `Process: ... (code=exited, status=0/SUCCESS)` line, not the shell exit
+code, to see whether the run itself succeeded.
 
 ## Notes
 
