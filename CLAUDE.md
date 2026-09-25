@@ -7,8 +7,9 @@ Guidance for Claude Code (and other agents) working in this repository.
 This project monitors the news for mentions of **FDC (Fahi Dhiriulhun Corporation)** and its
 related brand names/projects (Aman Udhares, Aman Dhoadhi, 4000 Flats, Fahi Flats — in both
 English and Dhivehi) so that PR/communications staff can react quickly to press coverage.
-Twice a day (11:00 AM and 9:00 PM Maldives time) it searches Google News, finds new articles,
-and posts links to a Telegram group/channel for the team to triage.
+Twice a day (11:00 AM and 9:00 PM Maldives time) it checks each monitored outlet's own FDC
+tag/category page for new articles, plus a general Google News keyword search as a catch-all,
+and posts new links to a Telegram group/channel for the team to triage.
 
 This is currently a small, single-purpose VPS script run on a schedule via systemd timer —
 not a web app or service. See "Deployment" below for where it actually runs.
@@ -19,58 +20,68 @@ not a web app or service. See "Deployment" below for where it actually runs.
 run.py              entry point → app.main.main(); catches a total run failure and tries to
                      post a Telegram alert before re-raising, so a broken run isn't silent
 app/
-  config.py         loads .env (Telegram creds) and config.yaml (websites/keywords) at import time
-  search.py         builds Google News RSS queries, filters by date client-side, resolves
-                     Google's redirect links to real publisher URLs
+  config.py         loads .env (Telegram creds, feature flags) and config.yaml (keywords)
+  http.py           shared request_with_retry() + USER_AGENT used by search.py and tags.py
+  tags.py           scrapes each site's FDC tag/search page (tags.yaml / search.yaml) for
+                     article links — the primary discovery method
+  search.py         general (no site restriction) Google News RSS keyword search - the
+                     catch-all; also resolve_real_url() for Google's redirect links
   database.py       SQLite (data/articles.db) — dedupe store, one table: articles(url, posted_at)
-  telegram.py       posts a URL to Telegram via sendMessage (with retry/backoff); success ==
+  telegram.py       posts a message to Telegram via sendMessage (with retry/backoff); success ==
                      Telegram confirms "ok"
-  main.py           orchestrates: search_all() -> resolve_real_url() -> filter already-posted
-                     -> post_url() -> record
-config.yaml          list of monitored websites + search keywords (source of truth for what's
-                      tracked). Domain form matters — see "site: matching" below; don't assume
-                      bare-domain is always right without checking.
-.env                 TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (not committed)
+  main.py           orchestrates: gather_discoveries() -> resolve (Google links only) -> filter
+                     already-posted -> post_url() -> record
+config.yaml          search keywords only (used by the general Google search)
+tags.yaml            FDC tag/category page URL per monitored site — the source of truth for
+                      which sites are covered and how
+search.yaml           site-search fallback URLs, for sites without a clean tag page
+.env                 TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, feature flags (not committed)
 ```
 
-Data flow per run (`app/main.py`):
-1. `search_all()` runs two discovery methods, both against Google News RSS with no
-   country-edition lock (`hl=en` only, no `gl`/`ceid`):
-   - **Site-restricted**: one `site:domain "keyword"` query per website per keyword. A combined
-     `(site:a OR site:b OR ...) "keyword"` query was tried to cut request volume and found to
-     break Google's AND logic between the site clause and the keyword — it returned ~100
-     generic recent articles per site regardless of keyword relevance (confirmed live: one
-     slipped through to the Telegram channel) instead of the handful of genuinely on-topic
-     ones. Do not reintroduce that without re-verifying against live results first.
-   - **General**: each keyword with no site restriction, one request per keyword.
-2. Each query's results are filtered client-side to the last `LOOKBACK_DAYS` (default 2) using
-   `entry.published_parsed` — see "date filtering" below for why this isn't done server-side.
-3. Results are deduplicated in-memory (dict-based, preserves order).
-4. Each surviving URL — still a `news.google.com/rss/articles/...` redirect link at this point —
-   is resolved to the real publisher URL via `resolve_real_url()` before anything else touches it.
+Data flow per run (`app/main.py`'s `gather_discoveries()` + `main()`):
+1. **Tag/search-page discovery** (`app/tags.py`, primary method): fetches every URL in
+   `tags.yaml` and `search.yaml` (one request each, first page only — no pagination, see
+   below) and extracts article links by URL *shape*: a path containing a run of 4+ digits
+   (`/85761`, `/news/54293`, `/articles/21805`, ...) or a long hyphenated slug (4+ hyphens,
+   30+ chars — for sites like `corporatemaldives.com` that use slugs instead of numeric IDs),
+   excluding a small denylist of nav path prefixes (`/category`, `/tag`, `/login`, etc.).
+   Verified against all URLs in `tags.yaml`/`search.yaml` at the time this was built — see
+   "tag-page extraction heuristic" below before changing it.
+2. **General Google News search** (`app/search.py`, catch-all): one query per keyword, no site
+   restriction, no country-edition lock (`hl=en` only, no `gl`/`ceid`). Results are filtered
+   client-side to the last `LOOKBACK_DAYS` (default 2) using `entry.published_parsed` — see
+   "date filtering" below for why this isn't done server-side. Only Google's method needs this;
+   tag pages list newest-first, so no date filtering is needed there at all.
+3. Both methods' results are merged into one `{url: reason}` dict, tag/search-page results
+   first (their reason wins if a URL somehow appears via both methods).
+4. Only URLs on `news.google.com` (i.e. from the Google search) go through
+   `resolve_real_url()` to decode Google's redirect link to the real publisher URL — tag-page
+   URLs are already the real, direct article URL, no resolution needed.
 5. For each real URL: check SQLite `exists()` → skip if already posted.
-6. Otherwise `post_url()` → only on Telegram API returning `ok: true` is the URL saved via `add()`.
-   This "record only after confirmed send" ordering is intentional — it prevents an article from
-   being silently marked as "handled" if the Telegram post actually failed.
+6. Otherwise `post_url()` → only on Telegram API returning `ok: true` is the URL saved via
+   `add()`. This "record only after confirmed send" ordering is intentional — it prevents an
+   article from being silently marked as "handled" if the Telegram post actually failed.
 
 The DB intentionally stores **only** the resolved real URL + timestamp — no article content/text
 is scraped or retained.
 
 ## Conventions
 
-- Plain, dependency-light Python (`requests`, `python-dotenv`, `feedparser`, `PyYAML`). Keep it
-  that way unless there's a concrete reason to add a dependency.
+- Plain, dependency-light Python (`requests`, `python-dotenv`, `feedparser`, `PyYAML`,
+  `beautifulsoup4`). Keep it that way unless there's a concrete reason to add a dependency.
 - No test suite currently exists. If you add non-trivial logic (query building, dedup, date
-  windows, URL resolution), prefer adding tests over trusting manual runs.
-- Config changes (adding a monitored site or keyword) go in `config.yaml`, not hardcoded in `app/`.
+  windows, URL resolution, the tag-page extraction heuristic), prefer adding tests over
+  trusting manual runs.
+- Adding a monitored site: add its FDC tag/category page URL to `tags.yaml` (or `search.yaml`
+  if it doesn't have a clean tag page — see below). Don't hardcode sites in `app/`.
 - Secrets (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`) live only in `.env` (gitignored, `chmod 600`
   on the VPS). Never commit real credentials; `.env.example` documents the required keys with
   placeholder values.
-- `app/config.py` reads env vars eagerly at import time via `os.environ[...]` (not `.get`), so a
-  missing `.env` fails fast and loudly on startup rather than later mid-run.
-- Network calls in `search.py` and `telegram.py` go through a small retry-with-backoff wrapper
-  (`MAX_RETRIES`, `RETRY_BACKOFF_SECONDS`). Keep new network calls consistent with that rather
-  than adding bare `requests.get`/`.post` calls with no retry handling.
+- `app/config.py` reads Telegram env vars eagerly at import time via `os.environ[...]` (not
+  `.get`), so a missing `.env` fails fast and loudly on startup rather than later mid-run.
+- Network calls go through `app/http.py`'s `request_with_retry()` (`MAX_RETRIES`,
+  `RETRY_BACKOFF_SECONDS`). Keep new network calls consistent with that rather than adding bare
+  `requests.get`/`.post` calls with no retry handling.
 
 ## Running locally
 
@@ -100,17 +111,43 @@ dependencies or credentials change (`.venv/bin/pip install -r requirements.txt`,
 
 ## Known limitations / things to keep in mind when extending this
 
-- **Single search backend**: everything goes through Google News RSS (`feedparser`). It's free
-  and dependency-light but unofficial — no SLA, results can be rate-limited or change format
-  without notice. This is a deliberate scope choice (confirmed with the project owner) over
-  adding a paid general web-search API; it means only content Google categorizes as "News" is
-  found — not blog posts, forum threads, or social media mentions.
-- **Date filtering is client-side, not query-side**: Google News RSS's `after:`/`before:`/`when:`
-  query operators were tried and found to silently return **zero results** for these queries
-  (confirmed against real, existing FDC coverage) — not "unsupported and ignored," but actively
-  filtering everything out. `search.py` fetches each query unfiltered and filters on
-  `entry.published_parsed` in Python (`LOOKBACK_DAYS`, default 2). Do not reintroduce
-  server-side date operators without re-verifying against live results first.
+- **Tag-page extraction heuristic can go wrong two ways**: too loose (nav links slip through as
+  false "articles") or too strict (a real article gets excluded because its URL doesn't have 4+
+  digits or a long-enough hyphenated slug). If a site's tag page stops producing results, or
+  starts producing garbage, check `app/tags.py`'s `_looks_like_article()` against that site's
+  actual current link structure before assuming the site itself is broken — CMS redesigns will
+  break this silently, there's no error, it'll just quietly find 0 (or wrong) articles.
+- **Tag pages depend on the publication's own tagging being complete**: if a site's editors
+  don't tag an FDC-related article, this method won't find it — this is the tradeoff for the
+  much higher precision/recall it gives over keyword search. The general Google search running
+  in parallel is the safety net for this, not a redundant afterthought - don't remove it.
+- **`sangu.mv`'s site-search URL (in `search.yaml`) returns 403** (likely bot-blocking) even
+  though its tag page (in `tags.yaml`) works fine. The search.yaml entry is currently dead
+  weight for that domain; harmless (fails gracefully, returns empty) but worth removing if
+  confirmed still broken later.
+- **`corporatemaldives.com` needs the hyphenated-slug branch of the heuristic**, not the
+  digit-run branch — its article URLs are things like
+  `/fdc-signs-epc-contract-with-ashoka-buildcon-limited-to-develop-2000-housing-units-in-hulhumale-phase-2/`.
+  If a future site also uses slug URLs, verify its typical slug length/hyphen-count against
+  `MIN_SLUG_HYPHENS`/`MIN_SLUG_LENGTH` in `app/tags.py` rather than assuming the existing
+  thresholds fit.
+- **No pagination**: `app/tags.py` only fetches the first page of each tag/search URL. This is
+  deliberate — repeat runs plus DB dedup mean the backlog gets caught up over time as long as
+  the run cadence keeps up with each site's posting frequency. If a site posts more than a
+  page's worth of FDC-tagged articles between two scheduled runs, some could be missed; not
+  observed so far, but worth knowing if coverage ever looks like it's skipping things.
+- **Google News search remains only for catch-all/safety-net coverage**: don't restore the old
+  per-site `site:domain "keyword"` queries — tag pages replaced that method because it's
+  fragile (`www.` sensitivity, unreliable date operators, weak Dhivehi recall) and lower
+  precision. See git history (commits around the "Switch primary discovery" change) for the
+  full reasoning if reconsidering this.
+- **Date filtering is client-side, not query-side (Google search only)**: Google News RSS's
+  `after:`/`before:`/`when:` query operators were tried and found to silently return **zero
+  results** for these queries (confirmed against real, existing FDC coverage) — not "unsupported
+  and ignored," but actively filtering everything out. `search.py` fetches each query
+  unfiltered and filters on `entry.published_parsed` in Python (`LOOKBACK_DAYS`, default 2).
+  Do not reintroduce server-side date operators without re-verifying against live results
+  first. This doesn't apply to tag pages, which need no date filtering at all.
 - **Google News redirect links require server-side resolution**: `entry.link` from the RSS feed
   is always a `news.google.com/rss/articles/...` link that only resolves via client-side JS — a
   raw fetch (including Telegram's own link-preview fetcher) sees a blank "Google News" page, no
@@ -118,23 +155,12 @@ dependencies or credentials change (`.venv/bin/pip install -r requirements.txt`,
   undocumented Google endpoint (extracts `data-n-a-id`/`-sg`/`-ts` from the redirect page, then
   calls `news.google.com/_/DotsSplashUi/data/batchexecute`). This is inherently fragile — if
   Google changes this mechanism, `resolve_real_url()` falls back to returning the original
-  redirect link rather than dropping the article, but the "real URL" behavior would silently stop
-  working. If posted messages start looking like bare `news.google.com` links again, this is the
-  first place to check.
-- **`site:` matching is `www.`-sensitive and inconsistent per-site**: Google's `site:` operator
-  frequently fails to match a domain's canonical form if `config.yaml` lists it differently
-  (mostly `www.` vs bare — verified: 14 of the original 17 configured sites returned near-zero
-  results with `www.` where the bare domain returned dozens to 100). This isn't uniform — one
-  site (`www.oneonline.mv`) actually performs *better* with `www.`, and one (`www.sangu.tv`)
-  returns zero either way and may not be indexed by Google News at all. When adding a new site to
-  `config.yaml`, spot-check both forms with a generic query (`site:<domain> news`) before assuming
-  the bare domain is correct.
-- **Dhivehi-script keyword search is weak**: spot-checked against a very common Dhivehi word
-  (`ރާއްޖެ`, "Maldives") and got only 1 result via Google News RSS — vs. dozens/hundreds expected.
-  Google News RSS appears to have poor recall for Thaana-script queries generally, not just niche
-  FDC terms. The Dhivehi keywords in `config.yaml` are kept as an additional signal, but the
-  English keywords are the more reliable coverage; don't assume parity between the two halves of
-  the keyword list.
+  redirect link rather than dropping the article, but the "real URL" behavior would silently
+  stop working. Only matters for the general-search path now; tag-page URLs never need this.
+- **Dhivehi-script keyword search is weak (Google search only)**: spot-checked against a very
+  common Dhivehi word (`ރާއްޖެ`, "Maldives") and got only 1 result via Google News RSS — vs.
+  dozens/hundreds expected. This was a major reason for switching to tag-page discovery, which
+  relies on each publication's own editorial tagging instead and doesn't have this weakness.
 - **No structured logging**: output is `print()` to stdout, captured by systemd/journald
   (`journalctl -u fdc-news-scraper.service`). Retention is handled by journald's own defaults,
   not by the app.
@@ -143,8 +169,9 @@ dependencies or credentials change (`.venv/bin/pip install -r requirements.txt`,
   N days" or "the systemd timer silently stopped firing" — those still require an external
   dead-man's-switch (e.g. healthchecks.io) if that level of assurance is needed later.
 - **Single Telegram destination**: one bot token/chat ID pair; no per-keyword routing.
-- **Query volume**: `N websites × M keywords + M keywords` — ~180 requests/run for the current
-  17 sites × 10 keywords, down from ~360 in the original per-site-per-day implementation (the
-  date-based `days_ago` loop was removed; see date filtering above). Sequential with
-  retry/backoff. This is a deliberate correctness-over-speed tradeoff — see the OR-combined
-  query note above for why it isn't smaller.
+- **Dev/monitoring-stage feature flags** (`.env`, both default `false`): `RUN_SUMMARY_ENABLED`
+  posts a per-run summary (counts + which URLs) to the channel and appends it to
+  `data/run.log`. `POST_REASON_ENABLED` appends a note to each posted article explaining which
+  method/site/keyword found it. Both exist to make discovery quality visible during the current
+  solo-monitoring period — see project memory `project_soft_launch_monitoring` if available.
+  Turn both off before wider team rollout so the channel only carries clean article links.
