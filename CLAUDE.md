@@ -117,6 +117,22 @@ dependencies or credentials change (`.venv/bin/pip install -r requirements.txt`,
   starts producing garbage, check `app/tags.py`'s `_looks_like_article()` against that site's
   actual current link structure before assuming the site itself is broken — CMS redesigns will
   break this silently, there's no error, it'll just quietly find 0 (or wrong) articles.
+- **URL shape alone isn't enough — some tag pages mix in an unrelated sidebar widget with the
+  same shape.** Confirmed live: `javiyani.mv`'s tag page also renders a "trending now" sidebar
+  elsewhere on the same page, using the same numeric-ID URL pattern as the genuine tag listing —
+  an unrelated Asian Games article got posted to the Telegram channel as a result before this
+  was caught. Fixed by clustering candidate links by their nearest classed ancestor's
+  (tag name, class set) "template signature" (`_template_signature()`/`_cluster_by_template()`
+  in `app/tags.py`) and keeping only the largest cluster, on the assumption that the real
+  listing is the dominant one on the page. Similarity is fuzzy (Jaccard ≥
+  `TEMPLATE_SIMILARITY_THRESHOLD`, not exact match) because exact matching was tried first and
+  was *too* strict — real sites vary a card's classes slightly between instances (e.g. a
+  Tailwind spacing utility like `mb-7` present on all-but-the-last item in a row), which falsely
+  split one genuine listing into multiple smaller clusters (verified on `avas.mv`: exact
+  matching only kept 18 of 25 genuine articles; fuzzy matching recovered 24 of 25). This
+  clustering assumption ("largest cluster = real content") could misfire on a page where a
+  widget genuinely has more items than the real tag listing - not observed so far, but worth
+  knowing if a site's coverage looks suspiciously wrong.
 - **Tag pages depend on the publication's own tagging being complete**: if a site's editors
   don't tag an FDC-related article, this method won't find it — this is the tradeoff for the
   much higher precision/recall it gives over keyword search. The general Google search running
@@ -125,6 +141,14 @@ dependencies or credentials change (`.venv/bin/pip install -r requirements.txt`,
   though its tag page (in `tags.yaml`) works fine. The search.yaml entry is currently dead
   weight for that domain; harmless (fails gracefully, returns empty) but worth removing if
   confirmed still broken later.
+- **`www.oneonline.mv` is blocked from the VPS specifically, not from arbitrary machines**:
+  its tag page works fine when fetched from a residential/dev machine, but from the VPS returns
+  a Cloudflare "Attention Required!" challenge page (403) — a datacenter-IP/ASN-based block,
+  confirmed not fixable by changing User-Agent or adding a Referer header. Coverage for this
+  site currently relies entirely on the general Google search catch-all. Fixing this properly
+  would need a residential/mobile proxy for this one site's requests; not implemented, given the
+  complexity/benefit tradeoff for a single site. If more sites start getting blocked this way,
+  worth revisiting.
 - **`corporatemaldives.com` needs the hyphenated-slug branch of the heuristic**, not the
   digit-run branch — its article URLs are things like
   `/fdc-signs-epc-contract-with-ashoka-buildcon-limited-to-develop-2000-housing-units-in-hulhumale-phase-2/`.

@@ -1,4 +1,5 @@
 import re
+from collections import defaultdict
 from urllib.parse import urljoin, urlparse
 
 import yaml
@@ -47,6 +48,70 @@ def _looks_like_article(path: str) -> bool:
         return True
     return False
 
+MAX_ANCESTOR_DEPTH = 15
+# Two cards are considered the same template if their nearest classed
+# ancestor's class sets overlap by at least this fraction (Jaccard
+# similarity). Exact-match was tried first and was too strict - real sites
+# vary a card's classes slightly between instances (e.g. a conditional
+# spacing utility like Tailwind's "mb-7" on all-but-the-last item in a row),
+# which falsely split one genuine listing into multiple smaller clusters
+# (verified on avas.mv: exact matching only kept 18 of 25 genuine articles).
+TEMPLATE_SIMILARITY_THRESHOLD = 0.5
+
+def _template_signature(a_tag):
+    """The (tag name, class set) of the link's nearest classed ancestor - a
+    proxy for "which template rendered this card". Cards from the same
+    repeating listing share this closely; an unrelated card from a
+    same-shaped-URL sidebar/"trending" widget elsewhere on the page renders
+    from a visibly different template."""
+    node = a_tag.parent
+    depth = 0
+    while node is not None and depth < MAX_ANCESTOR_DEPTH:
+        classes = getattr(node, "attrs", {}).get("class") if hasattr(node, "attrs") else None
+        if classes:
+            return (node.name, frozenset(classes))
+        node = node.parent
+        depth += 1
+    return None
+
+def _jaccard(a: frozenset, b: frozenset) -> float:
+    union = a | b
+    return len(a & b) / len(union) if union else 1.0
+
+def _cluster_by_template(candidates: list[tuple[str, object]]) -> list[str]:
+    """Union-find clustering of candidates by template-signature similarity;
+    returns the hrefs of the largest cluster."""
+    signatures = [_template_signature(a) for _, a in candidates]
+    parent = list(range(len(candidates)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i, j):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+
+    for i in range(len(candidates)):
+        if signatures[i] is None:
+            continue
+        tag_i, classes_i = signatures[i]
+        for j in range(i + 1, len(candidates)):
+            if signatures[j] is None:
+                continue
+            tag_j, classes_j = signatures[j]
+            if tag_i == tag_j and _jaccard(classes_i, classes_j) >= TEMPLATE_SIMILARITY_THRESHOLD:
+                union(i, j)
+
+    clusters = defaultdict(list)
+    for i, (href, _) in enumerate(candidates):
+        clusters[find(i)].append(href)
+
+    return max(clusters.values(), key=lambda hrefs: len(set(hrefs)))
+
 def extract_articles(page_url: str) -> list[str]:
     """Fetch a tag/search page and return the article URLs on it (first page
     only - repeat runs plus DB dedupe handle catching up over time, no
@@ -58,14 +123,25 @@ def extract_articles(page_url: str) -> list[str]:
     soup = BeautifulSoup(response.content, "html.parser")
     page_domain = urlparse(page_url).netloc.removeprefix("www.")
 
-    urls = []
+    candidates = []
     for a in soup.find_all("a", href=True):
         href = urljoin(page_url, a["href"]).split("#")[0]
         parsed = urlparse(href)
         if parsed.netloc.removeprefix("www.") != page_domain:
             continue
         if _looks_like_article(parsed.path):
-            urls.append(href)
+            candidates.append((href, a))
+
+    if not candidates:
+        return []
+
+    # Some sites' tag pages mix the actual tag listing with a smaller
+    # "related"/"trending" sidebar widget that happens to use the same URL
+    # shape (verified on javiyani.mv, where this let an unrelated Asian
+    # Games article slip through to the Telegram channel). Cluster
+    # candidates by template signature and keep only the largest cluster -
+    # the real listing is presumed to be the dominant one on the page.
+    urls = _cluster_by_template(candidates)
 
     return list(dict.fromkeys(urls))
 
