@@ -1,6 +1,6 @@
 from .config import WEBSITES, KEYWORDS
 from .database import connect, exists, add
-from .search import search_all
+from .search import search_all, resolve_real_url
 from .telegram import post_url
 
 def main():
@@ -17,22 +17,24 @@ def main():
     skipped = 0
     failed = 0
 
-    for url in urls:
-        if exists(conn, url):
+    for google_url in urls:
+        real_url = resolve_real_url(google_url)
+
+        if exists(conn, real_url):
             skipped += 1
             continue
 
         try:
-            print(f"Posting: {url}")
-            if post_url(url):
-                add(conn, url)
+            print(f"Posting: {real_url}")
+            if post_url(real_url):
+                add(conn, real_url)
                 posted += 1
             else:
                 failed += 1
-                print(f"Telegram did not confirm posting: {url}")
+                print(f"Telegram did not confirm posting: {real_url}")
         except Exception as exc:
             failed += 1
-            print(f"Failed to post {url}: {exc}")
+            print(f"Failed to post {real_url}: {exc}")
 
     conn.close()
 

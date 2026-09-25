@@ -4,23 +4,23 @@
 # 2) general keyword searches
 
 websites:
-  - www.edition.mv
+  - edition.mv
   - mihaaru.com
-  - www.avas.mv
-  - www.sun.mv
-  - www.psmnews.mv
-  - www.raajje.mv
+  - avas.mv
+  - sun.mv
+  - psmnews.mv
+  - raajje.mv
   - dhauru.com
   - www.oneonline.mv
   - adhadhu.com
-  - www.cnm.mv
-  - www.thepress.mv
-  - www.maldivesindependent.com
-  - www.miadhu.mv
-  - www.sangu.tv
-  - www.vnews.mv
-  - www.atolltimes.mv
-  - www.corporatemaldives.com
+  - cnm.mv
+  - thepress.mv
+  - maldivesindependent.com
+  - miadhu.mv
+  - www.sangu.tv # returns 0 results either way with/without www - may not be indexed by Google News, needs manual check
+  - vnews.mv
+  - atolltimes.mv
+  - corporatemaldives.com
 
 keywords:
   - "fahi dhiriulhun corporation"
