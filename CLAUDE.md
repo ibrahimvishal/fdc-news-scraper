@@ -141,14 +141,16 @@ dependencies or credentials change (`.venv/bin/pip install -r requirements.txt`,
   though its tag page (in `tags.yaml`) works fine. The search.yaml entry is currently dead
   weight for that domain; harmless (fails gracefully, returns empty) but worth removing if
   confirmed still broken later.
-- **`www.oneonline.mv` is blocked from the VPS specifically, not from arbitrary machines**:
-  its tag page works fine when fetched from a residential/dev machine, but from the VPS returns
-  a Cloudflare "Attention Required!" challenge page (403) — a datacenter-IP/ASN-based block,
-  confirmed not fixable by changing User-Agent or adding a Referer header. Coverage for this
-  site currently relies entirely on the general Google search catch-all. Fixing this properly
-  would need a residential/mobile proxy for this one site's requests; not implemented, given the
-  complexity/benefit tradeoff for a single site. If more sites start getting blocked this way,
-  worth revisiting.
+- **`www.oneonline.mv` and `dhen.mv` are blocked from the VPS specifically, not from arbitrary
+  machines**: both tag pages work fine fetched from a residential/dev machine, but from the VPS
+  return a Cloudflare challenge page (403 "Attention Required!" for oneonline.mv, "Just a
+  moment..." for dhen.mv) — a datacenter-IP/ASN-based block, confirmed not fixable by changing
+  User-Agent or adding a Referer header. Coverage for these two sites currently relies entirely
+  on the general Google search catch-all. Fixing this properly would need a residential/mobile
+  proxy for their requests; not implemented, given the complexity/benefit tradeoff. If more
+  sites start getting blocked this way, worth revisiting - it may be Cloudflare's default bot
+  fight mode rather than something specific to these two, in which case it'll keep recurring as
+  more sites are added to `tags.yaml`.
 - **`corporatemaldives.com` needs the hyphenated-slug branch of the heuristic**, not the
   digit-run branch — its article URLs are things like
   `/fdc-signs-epc-contract-with-ashoka-buildcon-limited-to-develop-2000-housing-units-in-hulhumale-phase-2/`.
