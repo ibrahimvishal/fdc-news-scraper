@@ -28,7 +28,9 @@ config.yaml          list of monitored websites + search keywords (source of tru
 
 Data flow per run (`app/main.py`):
 1. `search_all()` runs two discovery methods per keyword: site-restricted (`site:domain`) and
-   general news search, each for today and yesterday (`days_ago in (0, 1)`).
+   general news search. Each query is fetched once (no server-side date operator — see note
+   below) and results are filtered client-side to the last `LOOKBACK_DAYS` (default 2) using
+   each entry's `published_parsed` date.
 2. Results are deduplicated in-memory (dict-based, preserves order) before touching the DB.
 3. For each URL: check SQLite `exists()` → skip if already posted.
 4. Otherwise `post_url()` → only on Telegram API returning `ok: true` is the URL saved via `add()`.
@@ -65,13 +67,19 @@ python run.py
 - **Single search backend**: everything goes through Google News RSS (`feedparser`). It's free
   and dependency-light but unofficial — no SLA, results can be rate-limited or change format
   without notice.
+- **Date filtering is client-side, not query-side**: Google News RSS's `after:`/`before:`/`when:`
+  query operators were tried and found to silently return **zero results** for these queries
+  (confirmed against real, existing FDC coverage) — not "unsupported and ignored," but
+  actively filtering everything out. `search.py` now fetches each query unfiltered and filters
+  on `entry.published_parsed` in Python (`LOOKBACK_DAYS`, default 2). Do not reintroduce
+  server-side date operators without re-verifying against live results first.
 - **No retry/backoff**: a single failed request (network blip, Google rate limit) just drops that
-  keyword/site/day combination for the run; it isn't retried until the next scheduled run.
+  keyword/site combination for the run; it isn't retried until the next scheduled run.
 - **No structured logging**: output is `print()` to stdout, redirected to a log file by cron.
   There's no log rotation configured in the README's cron example.
 - **No monitoring/alerting**: if the script silently stops finding results (e.g. Google changes
   RSS behavior, or the VPS cron stops firing), nothing currently notifies anyone.
 - **Single Telegram destination**: one bot token/chat ID pair; no per-keyword routing.
-- **Query volume**: for N websites × M keywords × 2 days, plus M keywords × 2 days for general
-  search, each run issues `N*M*2 + M*2` RSS requests sequentially — worth watching as
-  `config.yaml` grows, both for runtime and for Google rate-limiting risk.
+- **Query volume**: for N websites × M keywords, plus M keywords for general search, each run
+  issues `N*M + M` RSS requests sequentially — worth watching as `config.yaml` grows, both for
+  runtime and for Google rate-limiting risk.
