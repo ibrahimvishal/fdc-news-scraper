@@ -10,7 +10,8 @@ English and Dhivehi) so that PR/communications staff can react quickly to press 
 Twice a day (11:00 AM and 9:00 PM Maldives time) it searches Google News, finds new articles,
 and posts links to a Telegram group/channel for the team to triage.
 
-This is currently a small, single-purpose VPS cron script — not a web app or service.
+This is currently a small, single-purpose VPS script run on a schedule via systemd timer —
+not a web app or service. See "Deployment" below for where it actually runs.
 
 ## Architecture
 
@@ -134,12 +135,13 @@ dependencies or credentials change (`.venv/bin/pip install -r requirements.txt`,
   FDC terms. The Dhivehi keywords in `config.yaml` are kept as an additional signal, but the
   English keywords are the more reliable coverage; don't assume parity between the two halves of
   the keyword list.
-- **No structured logging**: output is `print()` to stdout, redirected to a log file by cron.
-  Log rotation is handled at the OS level (logrotate), not in the app — see README.
+- **No structured logging**: output is `print()` to stdout, captured by systemd/journald
+  (`journalctl -u fdc-news-scraper.service`). Retention is handled by journald's own defaults,
+  not by the app.
 - **No monitoring beyond failure alerts**: `run.py` posts a Telegram alert on an uncaught
   exception, but there's no detection for "the script ran fine but found suspiciously nothing for
-  N days" or "cron silently stopped firing" — those still require an external dead-man's-switch
-  (e.g. healthchecks.io) if that level of assurance is needed later.
+  N days" or "the systemd timer silently stopped firing" — those still require an external
+  dead-man's-switch (e.g. healthchecks.io) if that level of assurance is needed later.
 - **Single Telegram destination**: one bot token/chat ID pair; no per-keyword routing.
 - **Query volume**: `N websites × M keywords + M keywords` — ~180 requests/run for the current
   17 sites × 10 keywords, down from ~360 in the original per-site-per-day implementation (the
