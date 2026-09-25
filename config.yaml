@@ -1,0 +1,35 @@
+# News sources and keywords.
+# The same keywords are used for both:
+# 1) site-restricted searches against the website list
+# 2) general keyword searches
+
+websites:
+  - www.edition.mv
+  - mihaaru.com
+  - www.avas.mv
+  - www.sun.mv
+  - www.psmnews.mv
+  - www.raajje.mv
+  - dhauru.com
+  - www.oneonline.mv
+  - adhadhu.com
+  - www.cnm.mv
+  - www.thepress.mv
+  - www.maldivesindependent.com
+  - www.miadhu.mv
+  - www.sangu.tv
+  - www.vnews.mv
+  - www.atolltimes.mv
+  - www.corporatemaldives.com
+
+keywords:
+  - "fahi dhiriulhun corporation"
+  - "ފަހި ދިރިއުޅުން ކޯޕަރޭޝަން"
+  - "Aman udhares"
+  - "Aman Dhoadhi"
+  - "4000 Flat"
+  - "Fahi Flats"
+  - "އަމަން އުދަރެސް"
+  - "އަމަން ދޯދި"
+  - "4000 ފްލެޓް"
+  - "ފަހި ފްލެޓްސް"
