@@ -6,8 +6,8 @@ Small VPS-hosted news monitor.
 
 Twice per day, the script:
 
-1. Searches Google News, restricted to the predefined website list (all sites combined into
-   one query per keyword), for every configured keyword.
+1. Searches Google News, restricted to each site in the predefined website list, for every
+   configured keyword.
 2. Searches Google News with no site restriction, for every configured keyword.
 3. Filters both to articles published in the last 2 days.
 4. Deduplicates URLs during the run.

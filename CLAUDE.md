@@ -33,11 +33,15 @@ config.yaml          list of monitored websites + search keywords (source of tru
 ```
 
 Data flow per run (`app/main.py`):
-1. `search_all()` runs two discovery methods per keyword, both against Google News RSS with no
+1. `search_all()` runs two discovery methods, both against Google News RSS with no
    country-edition lock (`hl=en` only, no `gl`/`ceid`):
-   - **Site-restricted**: all configured websites combined into a single
-     `(site:a OR site:b OR ...) "keyword"` query — one request per keyword, not one per site.
-   - **General**: the same keyword with no site restriction.
+   - **Site-restricted**: one `site:domain "keyword"` query per website per keyword. A combined
+     `(site:a OR site:b OR ...) "keyword"` query was tried to cut request volume and found to
+     break Google's AND logic between the site clause and the keyword — it returned ~100
+     generic recent articles per site regardless of keyword relevance (confirmed live: one
+     slipped through to the Telegram channel) instead of the handful of genuinely on-topic
+     ones. Do not reintroduce that without re-verifying against live results first.
+   - **General**: each keyword with no site restriction, one request per keyword.
 2. Each query's results are filtered client-side to the last `LOOKBACK_DAYS` (default 2) using
    `entry.published_parsed` — see "date filtering" below for why this isn't done server-side.
 3. Results are deduplicated in-memory (dict-based, preserves order).
@@ -121,6 +125,8 @@ python run.py
   N days" or "cron silently stopped firing" — those still require an external dead-man's-switch
   (e.g. healthchecks.io) if that level of assurance is needed later.
 - **Single Telegram destination**: one bot token/chat ID pair; no per-keyword routing.
-- **Query volume**: 2 requests per keyword (site-restricted + general) — ~20 requests/run for the
-  current 10 keywords, down from ~360 in the original per-site-per-day implementation. Still
-  sequential with retry/backoff; watch this as `config.yaml` grows.
+- **Query volume**: `N websites × M keywords + M keywords` — ~180 requests/run for the current
+  17 sites × 10 keywords, down from ~360 in the original per-site-per-day implementation (the
+  date-based `days_ago` loop was removed; see date filtering above). Sequential with
+  retry/backoff. This is a deliberate correctness-over-speed tradeoff — see the OR-combined
+  query note above for why it isn't smaller.

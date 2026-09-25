@@ -38,11 +38,10 @@ def _request_with_retry(method: str, url: str, **kwargs):
             time.sleep(RETRY_BACKOFF_SECONDS * attempt)
     return None
 
-def build_query(keyword: str, domains: list[str] | None) -> str:
+def build_query(keyword: str, domain: str | None) -> str:
     query = f'"{keyword}"'
-    if domains:
-        site_clause = " OR ".join(f"site:{d}" for d in domains)
-        query = f'({site_clause}) {query}'
+    if domain:
+        query = f'site:{domain} {query}'
     return query
 
 def is_recent(entry) -> bool:
@@ -53,8 +52,8 @@ def is_recent(entry) -> bool:
     cutoff = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)
     return published_at >= cutoff
 
-def search(keyword: str, domains: list[str] | None) -> list[str]:
-    query = build_query(keyword, domains)
+def search(keyword: str, domain: str | None) -> list[str]:
+    query = build_query(keyword, domain)
     url = GOOGLE_NEWS_RSS.format(query=quote_plus(query))
     response = _request_with_retry("GET", url, headers={"User-Agent": USER_AGENT})
     if response is None:
@@ -75,12 +74,18 @@ def search(keyword: str, domains: list[str] | None) -> list[str]:
 def search_all(websites: list[str], keywords: list[str]) -> list[str]:
     urls = []
 
+    # One request per site per keyword. A combined "(site:a OR site:b OR ...)
+    # keyword" query was tried and found to break Google's AND logic between
+    # the site clause and the keyword - it returned ~100 generic recent
+    # articles per site regardless of keyword relevance, instead of the
+    # handful of genuinely on-topic ones. Do not reintroduce that
+    # optimization without re-verifying against live results first.
+    for domain in websites:
+        for keyword in keywords:
+            urls.extend(search(keyword, domain))
+
+    # General search, no site restriction.
     for keyword in keywords:
-        # All monitored sites combined into a single site:a OR site:b ... query,
-        # instead of one request per site — cuts request volume ~9x and lowers
-        # the chance of Google rate-limiting the host.
-        urls.extend(search(keyword, websites))
-        # General search, no site restriction.
         urls.extend(search(keyword, None))
 
     return list(dict.fromkeys(urls))
