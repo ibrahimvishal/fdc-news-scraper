@@ -5,6 +5,7 @@ from .config import KEYWORDS, RUN_SUMMARY_ENABLED, RUN_LOG_PATH, POST_REASON_ENA
 from .database import connect, exists, add
 from .search import search, resolve_real_url
 from .tags import discover as discover_tag_articles
+from .urls import normalize_url
 from .telegram import post_url
 
 def gather_discoveries() -> dict[str, str]:
@@ -72,9 +73,13 @@ def main():
         # Only Google News RSS gives back an obfuscated redirect link that needs
         # server-side resolution; tag/search-page discovery already returns the
         # real publisher URL directly.
-        real_url = resolve_real_url(url) if urlparse(url).netloc == "news.google.com" else url
+        real_url = normalize_url(
+            resolve_real_url(url) if urlparse(url).netloc == "news.google.com" else url
+        )
 
-        if exists(conn, real_url):
+        # Two discoveries can normalize to the same URL (e.g. Google resolving
+        # to an /amp variant of a tag-page hit); don't post it twice in a run.
+        if real_url in posted_urls or exists(conn, real_url):
             skipped += 1
             continue
 

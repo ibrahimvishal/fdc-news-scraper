@@ -69,7 +69,8 @@ is scraped or retained.
 
 - Plain, dependency-light Python (`requests`, `python-dotenv`, `feedparser`, `PyYAML`,
   `beautifulsoup4`). Keep it that way unless there's a concrete reason to add a dependency.
-- No test suite currently exists. If you add non-trivial logic (query building, dedup, date
+- Tests live in `tests/` (`pytest`; not in requirements.txt, install separately). Currently only
+  URL normalization/DB migration is covered. If you add non-trivial logic (query building, dedup, date
   windows, URL resolution, the tag-page extraction heuristic), prefer adding tests over
   trusting manual runs.
 - Adding a monitored site: add its FDC tag/category page URL to `tags.yaml` (or `search.yaml`
@@ -111,6 +112,15 @@ cd /opt/fdc-news-scraper && git pull
 dependencies or credentials change (`.venv/bin/pip install -r requirements.txt`, edit `.env`).
 
 ## Known limitations / things to keep in mind when extending this
+
+- **URLs are normalized before dedup/posting** (`app/urls.py`): tracking params (`ref`, `utm_*`,
+  `fbclid`...), trailing `/amp` and slashes are dropped. Found live: `edition.mv` appends
+  `?ref=tagpage-latest`/`cat-sub`/`article-related`, which made one article post 2-3 times.
+  `database.connect()` also runs an idempotent migration collapsing old un-normalized rows
+  (otherwise they'd be re-posted). Links with `ref=*related*` are skipped in tag-page extraction.
+  Still unexplained: on 2026-10-22 four years-old `edition.mv` articles (IDs 23937-44588) were
+  posted; the page's non-`tagpage-latest` sections (plain `/news/ID` links) may include
+  older/unrelated items - recheck if it recurs.
 
 - **Tag-page extraction heuristic can go wrong two ways**: too loose (nav links slip through as
   false "articles") or too strict (a real article gets excluded because its URL doesn't have 4+

@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 
 from .config import BASE_DIR
 from .http import request_with_retry, USER_AGENT
+from .urls import normalize_url, is_related_link
 
 # An article link is recognized by its URL path shape, not by guessing a
 # per-site selector: either it contains a run of 4+ digits (the common
@@ -125,12 +126,14 @@ def extract_articles(page_url: str) -> list[str]:
 
     candidates = []
     for a in soup.find_all("a", href=True):
-        href = urljoin(page_url, a["href"]).split("#")[0]
-        parsed = urlparse(href)
+        raw_href = urljoin(page_url, a["href"]).split("#")[0]
+        parsed = urlparse(raw_href)
         if parsed.netloc.removeprefix("www.") != page_domain:
             continue
+        if is_related_link(raw_href):
+            continue
         if _looks_like_article(parsed.path):
-            candidates.append((href, a))
+            candidates.append((normalize_url(raw_href), a))
 
     if not candidates:
         return []
